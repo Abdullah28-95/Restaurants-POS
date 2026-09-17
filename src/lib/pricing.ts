@@ -1,4 +1,5 @@
 import type { CartItem, DeliverySelection, Discount, Offer, PriceAndTax, Product } from '@/types/pos';
+import { generateId } from './generate-id';
 
 export function deliveryDiscountPercent(delivery?: DeliverySelection | null) {
   if (!delivery?.discount || !delivery.discount.isActive) return 0;
@@ -68,7 +69,7 @@ export function applyOffers(cart:CartItem[], orderType:number):CartItem[] {
       if (!offerCompatible(offer,item,orderType) || !offer.extraOffer || item.quantity < offer.qty || offer.qty<=0) continue;
       const q=Math.floor(item.quantity/offer.qty);
       const p:Product={...item.product,proId:offer.extraProduct || offer.productId,arName:offer.extraProductAr || item.product.arName,enName:offer.extraProductEn || item.product.enName,icon:null,price:offer.price,price2:offer.price,price3:offer.price,price4:offer.price};
-      out.push({id:crypto.randomUUID(),product:p,quantity:q,isOffer:true,flavors:[],questions:[],offers:[],note:'',originalPrice:0,extraItemId:item.id});
+      out.push({id:generateId(),product:p,quantity:q,isOffer:true,flavors:[],questions:[],offers:[],note:'',originalPrice:0,extraItemId:item.id});
     }
   }
   return out;
