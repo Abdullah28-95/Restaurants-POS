@@ -1,0 +1,1 @@
+export function Loading({label='جاري التحميل...'}:{label?:string}){return <div style={{padding:50,display:'flex',gap:12,justifyContent:'center',alignItems:'center'}}><span className="spinner"/><span>{label}</span></div>}

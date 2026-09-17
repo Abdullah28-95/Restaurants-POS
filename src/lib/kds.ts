@@ -1,0 +1,4 @@
+'use client';
+import type {buildInvoiceDraft} from './invoice';
+type Payload=ReturnType<typeof buildInvoiceDraft>;
+export async function sendKds(payload:Payload,invoiceNo?:string,port=8080,categoryKdsMap:Record<string,number>={}){return new Promise<void>((resolve,reject)=>{try{const proto=location.protocol==='https:'?'wss':'ws';const ws=new WebSocket(`${proto}://${location.hostname}:${port}`);const timer=setTimeout(()=>{ws.close();resolve()},1800);ws.onopen=()=>{ws.send(JSON.stringify({invoiceNo:invoiceNo||payload.invoices.InvoiceNo,tableNo:String(payload.invoices.TableNo),items:payload.invoiceDtl.map(x=>({proId:x.Item,name:x.Pro_AR_Name||x.Pro_EN_Name,qty:x.Qty,favor:x.Flavors,time:new Date().toISOString(),PreparationTime:x.PreparationTime,kdsNo:categoryKdsMap[String(x.CatID)]||0}))}));clearTimeout(timer);setTimeout(()=>{ws.close();resolve()},100)};ws.onerror=()=>{clearTimeout(timer);resolve()};}catch(e){reject(e)}})}
