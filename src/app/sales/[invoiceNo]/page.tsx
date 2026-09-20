@@ -1,8 +1,74 @@
 'use client';
-import {Suspense,useEffect,useMemo,useState} from 'react';import {useParams,useSearchParams} from 'next/navigation';import {AppShell} from '@/components/AppShell';import {Loading} from '@/components/Loading';import {Modal} from '@/components/Modal';import {usePos} from '@/context/PosContext';import {getInvoiceDetail,getReturnedInvoiceDetail,insertReturn} from '@/lib/pos-api';import type {InvoiceDetailResponse,InvoiceDetailLine} from '@/types/pos';
+import {Suspense,useEffect,useMemo,useState} from 'react';
+import {useParams,useSearchParams} from 'next/navigation';
+import {AppShell} from '@/components/AppShell';
+import {Loading} from '@/components/Loading';
+import {Modal} from '@/components/Modal';
+import {usePos} from '@/context/PosContext';
+import {getInvoiceDetail,getReturnedInvoiceDetail,insertReturn} from '@/lib/pos-api';
+import {printInvoiceDetail} from '@/lib/printing';
+import type {InvoiceDetailResponse} from '@/types/pos';
 type R=Record<string,unknown>;
-export default function Page(){return <AppShell title="تفاصيل الفاتورة"><Suspense fallback={<Loading/>}><Detail/></Suspense></AppShell>}
-function Detail(){const params=useParams<{invoiceNo:string}>(),sp=useSearchParams(),{user}=usePos();const [d,setD]=useState<InvoiceDetailResponse|null>(null),[returned,setReturned]=useState<R|null>(null),[loading,setLoading]=useState(true),[ret,setRet]=useState(false),[msg,setMsg]=useState('');const invoiceNo=decodeURIComponent(params.invoiceNo);async function load(){setLoading(true);try{setD(await getInvoiceDetail(invoiceNo));const rid=Number(sp.get('returnId')||0);if(rid&&user)setReturned(await getReturnedInvoiceDetail(rid,user.DefaultBranch));}finally{setLoading(false)}}useEffect(()=>{load()},[invoiceNo,user]);if(loading)return <Loading/>;if(!d)return <main className="content"><div className="empty">تعذر تحميل الفاتورة</div></main>;return <main className="content">{msg&&<div className="card" style={{padding:12,color:'#087658',marginBottom:10}}>{msg}</div>}<div className="grid3" style={{marginBottom:12}}><Stat k="رقم الفاتورة" v={String(d.invoices.InvoiceNo)}/><Stat k="الإجمالي" v={d.invoices.InvoiceGrandTotal.toFixed(3)}/><Stat k="التاريخ" v={new Date(d.invoices.SalesDate).toLocaleString('ar-JO')}/></div><div className="card" style={{padding:14,marginBottom:12}}><div className="grid3"><div><span className="muted">Subtotal</span><h3 className="num">{d.invoices.InvoiceSubTotal.toFixed(3)}</h3></div><div><span className="muted">Tax</span><h3 className="num">{d.invoices.InvoiceTaxTotal.toFixed(3)}</h3></div><div><span className="muted">Discount</span><h3 className="num">{d.invoices.InvoiceDiscountTotal.toFixed(3)}</h3></div></div></div><div className="table-wrap"><table className="table"><thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الخصم</th><th>الضريبة</th><th>الإجمالي</th></tr></thead><tbody>{d.invoiceDtl.map((x,i)=><tr key={i}><td>{x.ArName||x.EnName}{x.Flavors&&<div className="muted" style={{fontSize:11}}>{x.Flavors}</div>}</td><td className="num">{x.Qty}</td><td className="num">{x.Price.toFixed(3)}</td><td className="num">{x.DiscountV.toFixed(3)}</td><td className="num">{x.TaxV.toFixed(3)}</td><td className="num">{x.GrandTotal.toFixed(3)}</td></tr>)}</tbody></table></div><div style={{display:'flex',gap:8,marginTop:12}}><button className="btn primary" onClick={()=>printInvoice(d)}>طباعة</button>{!returned&&<button className="btn danger" onClick={()=>setRet(true)}>إرجاع أصناف</button>}</div>{returned&&<div className="card" style={{padding:14,marginTop:12,borderColor:'#e5a0a0'}}><b>هذا العرض مرتبط بمرتجع</b><pre style={{whiteSpace:'pre-wrap',fontSize:12}}>{JSON.stringify(returned,null,2)}</pre></div>}<ReturnModal open={ret} onClose={()=>setRet(false)} data={d} onDone={()=>{setRet(false);setMsg('تم تسجيل المرتجع بنجاح');load()}}/></main>}
-function Stat({k,v}:{k:string;v:string}){return <div className="card" style={{padding:14}}><div className="muted">{k}</div><strong style={{fontSize:20}}>{v}</strong></div>}
-function ReturnModal({open,onClose,data,onDone}:{open:boolean;onClose:()=>void;data:InvoiceDetailResponse;onDone:()=>void}){const [qty,setQty]=useState<Record<string,number>>({}),[loading,setLoading]=useState(false),[error,setError]=useState('');const selected=useMemo(()=>data.invoiceDtl.filter(x=>(qty[x.Item]||0)>0),[data,qty]);const sums=selected.reduce((a,x)=>{const q=Math.min(x.Qty,qty[x.Item]||0),r=q/x.Qty;return{sub:a.sub+x.Subtotal*r,disc:a.disc+x.DiscountV*r,tax:a.tax+x.TaxV*r,total:a.total+x.GrandTotal*r}},{sub:0,disc:0,tax:0,total:0});async function submit(){setLoading(true);setError('');try{const h=data.invoices;const hdr={ReturnId:0,ReturnDate:new Date().toISOString(),InvoiceNo:h.InvoiceNo,ReturnedBy:h.EmpTaker,FromCash:h.InvoiceCashNo,VoidReason:3,ExtraNote:'',ReturnsSubTotal:sums.sub,ReturnsDiscountTotal:sums.disc,ReturnsServiceTotal:0,ReturnsTaxTotal:sums.tax,ReturnsGrandTotal:sums.total,Warehouse:String(h.Warehouse),EncryptionSeal:'',Guid:h.Guid,Qrcode:h.Qrcode,CompanyId:h.DeliveryCompany,PayType:0,StationId:''};const dtl=selected.map((x,i)=>{const q=Math.min(x.Qty,qty[x.Item]||0),r=q/x.Qty;return{ReturnId:0,IndexId:i,ItemId:x.Item,Qty:q,UnitPrice:x.Price,SubTotal:x.Subtotal*r,Discount:x.DiscountV*r,TaxValue:x.TaxV*r,DiscountPercentage:x.DiscountP,TaxPercentage:x.TaxP,GrandTotal:x.GrandTotal*r,Posted:true,Warehouse:String(x.Warehouse)}});await insertReturn({Hdr:hdr,Dtl:dtl});onDone()}catch(e){setError(e instanceof Error?e.message:'فشل المرتجع')}finally{setLoading(false)}}return <Modal open={open} title="إرجاع أصناف" onClose={onClose} width={850} actions={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn danger" disabled={!selected.length||loading} onClick={submit}>{loading?'جاري الحفظ...':`تأكيد المرتجع ${sums.total.toFixed(3)}`}</button></>}><div className="selection-list">{data.invoiceDtl.map(x=><div className="select-card" key={x.Item+x.LineID}><div style={{flex:1}}><b>{x.ArName||x.EnName}</b><div className="muted">الكمية الأصلية: {x.Qty} · السعر: {x.Price.toFixed(3)}</div></div><input className="input num" style={{width:120}} type="number" min={0} max={x.Qty} step="1" value={qty[x.Item]||0} onChange={e=>setQty(q=>({...q,[x.Item]:Math.min(x.Qty,Math.max(0,Number(e.target.value)||0))}))}/></div>)}</div>{error&&<div style={{color:'#a22',marginTop:10}}>{error}</div>}</Modal>}
-function printInvoice(d:InvoiceDetailResponse){const w=window.open('','_blank','width=450,height=720');if(!w)return;w.document.write(`<html dir="rtl"><body style="font-family:Tahoma;width:76mm;margin:auto"><h2>فاتورة ${d.invoices.InvoiceNo}</h2>${d.invoiceDtl.map(x=>`<div style="display:flex;justify-content:space-between;border-bottom:1px dashed #aaa;padding:5px"><span>${x.ArName||x.EnName} × ${x.Qty}</span><b>${x.GrandTotal.toFixed(3)}</b></div>`).join('')}<h3>الإجمالي: ${d.invoices.InvoiceGrandTotal.toFixed(3)}</h3><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close()}
+
+export default function Page(){return <AppShell title="عرض وإرجاع الفاتورة"><Suspense fallback={<Loading/>}><Detail/></Suspense></AppShell>}
+
+function Detail(){
+  const params=useParams<{invoiceNo:string}>(),sp=useSearchParams(),{user,printerSettings}=usePos();
+  const [d,setD]=useState<InvoiceDetailResponse|null>(null),[returned,setReturned]=useState<R|null>(null),[loading,setLoading]=useState(true),[printing,setPrinting]=useState(false),[ret,setRet]=useState(false),[msg,setMsg]=useState(''),[error,setError]=useState('');
+  const invoiceNo=decodeURIComponent(params.invoiceNo);
+  async function load(){setLoading(true);setError('');try{setD(await getInvoiceDetail(invoiceNo));const rid=Number(sp.get('returnId')||0);if(rid&&user)setReturned(await getReturnedInvoiceDetail(rid,user.DefaultBranch));else setReturned(null)}catch(e){setError(e instanceof Error?e.message:'تعذر تحميل الفاتورة')}finally{setLoading(false)}}
+  useEffect(()=>{load()},[invoiceNo,user]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function reprint(){if(!d||!user)return;setPrinting(true);setError('');try{await printInvoiceDetail(d,user,printerSettings);setMsg('تم إرسال الفاتورة للطباعة');window.setTimeout(()=>setMsg(''),2800)}catch(e){setError(e instanceof Error?e.message:'فشلت إعادة الطباعة')}finally{setPrinting(false)}}
+  if(loading)return <Loading label="جاري تحميل تفاصيل الفاتورة..."/>;
+  if(!d)return <main className="content"><div className="page-alert error">{error||'تعذر تحميل الفاتورة'}</div></main>;
+  const h=d.invoices,currency=user?.DefaultCurrency||'';
+  return <main className="content invoice-view-page">
+    {msg&&<div className="page-alert success">{msg}</div>}{error&&<div className="page-alert error">{error}</div>}
+    <section className="invoice-view-hero card">
+      <div><span className="page-eyebrow">عرض وإرجاع</span><h1>فاتورة #{h.InvoiceNo}</h1><p>راجع تفاصيل الفاتورة والأصناف، أعد طباعتها أو نفّذ إرجاعًا جزئيًا من نفس الشاشة.</p></div>
+      <div className="invoice-view-actions"><button className="btn invoice-print-btn" onClick={reprint} disabled={printing}>{printing?'جاري الطباعة...':'إعادة طباعة'}</button>{!returned&&<button className="btn danger" onClick={()=>setRet(true)}>إرجاع أصناف</button>}</div>
+    </section>
+
+    <section className="invoice-view-stats">
+      <InvoiceStat label="رقم الفاتورة" value={`#${h.InvoiceNo}`}/>
+      <InvoiceStat label="الكاش" value={`#${h.InvoiceCashNo||'—'}`}/>
+      <InvoiceStat label="التاريخ" value={formatDate(h.RealTime||h.SalesDate)}/>
+      <InvoiceStat label="الإجمالي" value={`${h.InvoiceGrandTotal.toFixed(3)} ${currency}`} strong/>
+    </section>
+
+    <section className="invoice-view-grid">
+      <article className="invoice-items-card card">
+        <header className="invoice-section-head"><div><span className="page-eyebrow">تفاصيل المواد</span><h2>أصناف الفاتورة</h2></div><span className="invoice-lines-count">{d.invoiceDtl.length} صنف</span></header>
+        <div className="table-wrap invoice-items-table-wrap"><table className="table invoice-items-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الخصم</th><th>الضريبة</th><th>الإجمالي</th></tr></thead><tbody>{d.invoiceDtl.map((x,i)=><tr key={`${x.Item}-${x.LineID}-${i}`}><td><div className="invoice-item-name"><b>{x.ArName||x.EnName}</b>{x.Flavors&&<small>{x.Flavors}</small>}</div></td><td className="num">{x.Qty}</td><td className="num">{x.Price.toFixed(3)}</td><td className="num">{x.DiscountV.toFixed(3)}</td><td><div className="invoice-tax-cell"><span>الضريبة</span><b className="num">{x.TaxV.toFixed(3)}</b></div></td><td className="num invoice-line-total">{x.GrandTotal.toFixed(3)}</td></tr>)}</tbody></table></div>
+      </article>
+
+      <aside className="invoice-summary-card card">
+        <span className="page-eyebrow">الملخص المالي</span><h2>إجماليات الفاتورة</h2>
+        <div className="invoice-summary-list">
+          <SummaryRow label="المجموع" value={h.InvoiceSubTotal} currency={currency}/>
+          <SummaryRow label="الخصم" value={h.InvoiceDiscountTotal} currency={currency}/>
+          <SummaryRow label="الخدمة" value={h.InvoiceServiceTotal} currency={currency}/>
+          <SummaryRow label="الضريبة" value={h.InvoiceTaxTotal} currency={currency}/>
+          <SummaryRow label="الإجمالي" value={h.InvoiceGrandTotal} currency={currency} total/>
+        </div>
+        <div className="invoice-meta-panel"><div><span>المستخدم</span><b>{h.TakerName||h.EmpTaker||'—'}</b></div><div><span>نوع الطلب</span><b>{Number(h.TableNo)>=0?'محلي':'سفري'}</b></div>{Number(h.TableNo)>=0&&<div><span>الطاولة</span><b className="num">#{h.TableNo}</b></div>}<div><span>المحطة</span><b>{h.StationId||'—'}</b></div></div>
+      </aside>
+    </section>
+
+    {returned&&<section className="invoice-returned-banner card"><div><span className="invoice-returned-icon">↶</span><div><b>هذه الفاتورة مرتبطة بعملية مرتجع</b><small>أنت تعرض تفاصيل فاتورة سبق فتح مرتجع مرتبط بها.</small></div></div><span className="badge amber">مرتجع مسجل</span></section>}
+
+    <ReturnModal open={ret} onClose={()=>setRet(false)} data={d} onDone={()=>{setRet(false);setMsg('تم تسجيل المرتجع بنجاح');load()}}/>
+  </main>
+}
+
+function InvoiceStat({label,value,strong}:{label:string;value:string;strong?:boolean}){return <div className={`invoice-stat card ${strong?'strong':''}`}><span>{label}</span><b className="num">{value}</b></div>}
+function SummaryRow({label,value,currency,total}:{label:string;value:number;currency:string;total?:boolean}){return <div className={`invoice-summary-row ${total?'total':''}`}><span>{label}</span><b className="num">{Number(value||0).toFixed(3)} {currency}</b></div>}
+function formatDate(v:string){const d=new Date(v);return Number.isNaN(d.getTime())?v:d.toLocaleString('ar-JO',{dateStyle:'medium',timeStyle:'short'})}
+
+function ReturnModal({open,onClose,data,onDone}:{open:boolean;onClose:()=>void;data:InvoiceDetailResponse;onDone:()=>void}){
+  const [qty,setQty]=useState<Record<string,number>>({}),[loading,setLoading]=useState(false),[error,setError]=useState('');
+  const selected=useMemo(()=>data.invoiceDtl.filter(x=>(qty[x.Item]||0)>0),[data,qty]);
+  const sums=selected.reduce((a,x)=>{const q=Math.min(x.Qty,qty[x.Item]||0),r=q/x.Qty;return{sub:a.sub+x.Subtotal*r,disc:a.disc+x.DiscountV*r,tax:a.tax+x.TaxV*r,total:a.total+x.GrandTotal*r}},{sub:0,disc:0,tax:0,total:0});
+  async function submit(){setLoading(true);setError('');try{const h=data.invoices;const hdr={ReturnId:0,ReturnDate:new Date().toISOString(),InvoiceNo:h.InvoiceNo,ReturnedBy:h.EmpTaker,FromCash:h.InvoiceCashNo,VoidReason:3,ExtraNote:'',ReturnsSubTotal:sums.sub,ReturnsDiscountTotal:sums.disc,ReturnsServiceTotal:0,ReturnsTaxTotal:sums.tax,ReturnsGrandTotal:sums.total,Warehouse:String(h.Warehouse),EncryptionSeal:'',Guid:h.Guid,Qrcode:h.Qrcode,CompanyId:h.DeliveryCompany,PayType:0,StationId:''};const dtl=selected.map((x,i)=>{const q=Math.min(x.Qty,qty[x.Item]||0),r=q/x.Qty;return{ReturnId:0,IndexId:i,ItemId:x.Item,Qty:q,UnitPrice:x.Price,SubTotal:x.Subtotal*r,Discount:x.DiscountV*r,TaxValue:x.TaxV*r,DiscountPercentage:x.DiscountP,TaxPercentage:x.TaxP,GrandTotal:x.GrandTotal*r,Posted:true,Warehouse:String(x.Warehouse)}});await insertReturn({Hdr:hdr,Dtl:dtl});onDone()}catch(e){setError(e instanceof Error?e.message:'فشل المرتجع')}finally{setLoading(false)}}
+  return <Modal open={open} title="إرجاع أصناف الفاتورة" onClose={onClose} width={900} actions={<><button className="btn" onClick={onClose}>إلغاء</button><button className="btn danger" disabled={!selected.length||loading} onClick={submit}>{loading?'جاري الحفظ...':`تأكيد المرتجع ${sums.total.toFixed(3)}`}</button></>}><div className="return-modal-intro"><div><b>حدد الكمية المراد إرجاعها</b><small>يمكنك إرجاع صنف واحد أو أكثر بكمية لا تتجاوز الكمية الأصلية.</small></div><div className="return-modal-total"><span>إجمالي المرتجع</span><b className="num">{sums.total.toFixed(3)}</b></div></div><div className="selection-list return-selection-list">{data.invoiceDtl.map(x=><div className={`select-card return-select-card ${(qty[x.Item]||0)>0?'selected':''}`} key={`${x.Item}-${x.LineID}`}><div className="return-product-info"><b>{x.ArName||x.EnName}</b><small>الكمية الأصلية: <span className="num">{x.Qty}</span> · السعر: <span className="num">{x.Price.toFixed(3)}</span></small></div><label><span>كمية الإرجاع</span><input className="input num" type="number" min={0} max={x.Qty} step="1" value={qty[x.Item]||0} onChange={e=>setQty(q=>({...q,[x.Item]:Math.min(x.Qty,Math.max(0,Number(e.target.value)||0))}))}/></label></div>)}</div>{error&&<div className="page-alert error" style={{marginTop:10}}>{error}</div>}</Modal>
+}

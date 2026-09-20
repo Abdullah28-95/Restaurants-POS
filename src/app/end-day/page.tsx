@@ -6,7 +6,9 @@ import { AppShell } from '@/components/AppShell';
 import { Loading } from '@/components/Loading';
 import { usePos } from '@/context/PosContext';
 import { ApiError } from '@/lib/api-client';
-import { endDay, getOpenedPoints, getSaleDay } from '@/lib/pos-api';
+import { endDay, getLineSummary, getOpenedPoints, getSaleDay, getZReport } from '@/lib/pos-api';
+import { printEndDayReport, type EndDayPrintData } from '@/lib/printing';
+import { closePosApplication } from '@/lib/app-close';
 
 type R = Record<string, unknown>;
 
@@ -21,7 +23,7 @@ export default function Page() {
 }
 
 function EndDay() {
-  const { user } = usePos();
+  const { user, printerSettings } = usePos();
   const router = useRouter();
   const search = useSearchParams();
   const requestedDate = search.get('date') || '';
@@ -33,6 +35,7 @@ function EndDay() {
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [lastPrintReport, setLastPrintReport] = useState<EndDayPrintData | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -103,19 +106,47 @@ function EndDay() {
         return;
       }
 
+      const closedAt = new Date().toISOString();
       await endDay({
         LineDate: lineDate,
-        CloseTime: new Date().toISOString(),
+        CloseTime: closedAt,
         WareHouse: user.DefaultBranch,
       });
 
-      setMessage('تم إغلاق يوم العمل بنجاح.');
+      const [zReport, daySummary] = await Promise.all([
+        getZReport(user.DefaultBranch, lineDate).catch(() => []),
+        getLineSummary(user.DefaultBranch, lineDate).catch(() => []),
+      ]);
+      const reportData: EndDayPrintData = { lineDate, closedAt, z: zReport || [], summary: daySummary || [] };
+      setLastPrintReport(reportData);
       setSaleDay(null);
-      window.setTimeout(() => {
-        router.replace(`/reports?tab=z&lineDate=${encodeURIComponent(lineDate)}&closed=1`);
-      }, 650);
+      try {
+        await printEndDayReport(reportData, user, printerSettings);
+      } catch (printError) {
+        setMessage('تم إغلاق يوم العمل بنجاح، لكن الطباعة لم تكتمل.');
+        setError(printError instanceof Error ? `فشل طباعة تقرير إغلاق اليوم: ${printError.message}` : 'فشل طباعة تقرير إغلاق اليوم');
+        return;
+      }
+      setLastPrintReport(null);
+      setMessage('تم إغلاق يوم العمل وطباعته بنجاح.');
+      await closePosApplication();
     } catch (e) {
       setError(errorText(e));
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  async function retryEndDayPrint() {
+    if (!user || !lastPrintReport) return;
+    setClosing(true);
+    setError('');
+    try {
+      await printEndDayReport(lastPrintReport, user, printerSettings);
+      setLastPrintReport(null);
+      await closePosApplication();
+    } catch (e) {
+      setError(e instanceof Error ? `فشل طباعة تقرير إغلاق اليوم: ${e.message}` : 'فشل طباعة تقرير إغلاق اليوم');
     } finally {
       setClosing(false);
     }
@@ -140,6 +171,7 @@ function EndDay() {
 
       {error && <div className="end-day-alert error">{error}</div>}
       {message && <div className="end-day-alert success">{message}</div>}
+      {lastPrintReport && <div className="end-day-alert warning"><b>تقرير إغلاق اليوم جاهز لإعادة الطباعة.</b> <button className="btn" onClick={retryEndDayPrint} disabled={closing}>إعادة الطباعة</button></div>}
 
       <section className="end-day-stats">
         <Stat icon="▣" label="يوم العمل" value={lineDate || '—'} />

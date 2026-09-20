@@ -14,8 +14,8 @@ import {
   getSaleDay,
   getSalesSummary,
 } from '@/lib/pos-api';
-import { printLinesBySettings } from '@/lib/printing';
-import { clearUser } from '@/lib/session';
+import { printCashCloseReport, type CashClosePrintData } from '@/lib/printing';
+import { closePosApplication } from '@/lib/app-close';
 
 type R = Record<string, unknown>;
 
@@ -49,6 +49,7 @@ function Cash() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [lastPrintReport, setLastPrintReport] = useState<CashClosePrintData | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -114,12 +115,38 @@ function Cash() {
       };
 
       await closePoint(payload);
-      try {
-        await printLinesBySettings(shiftLines(payload, payments, cashInfo), printerSettings, true);
-      } catch {}
-
-      setSuccess(`تم إغلاق الكاش رقم ${payload.CashNo} بنجاح`);
+      const closedAt = String(payload.CashRealEndTime);
+      const reportData: CashClosePrintData = {
+        cashNo: String(payload.CashNo),
+        cashUser: String(payload.CashUser),
+        lineDate: lineDateParam || fmtDateIso(saleDay?.LineDate ?? cash.CashStartDate),
+        closedAt,
+        opening: n(cashInfo?.CashCustody),
+        cashSales: n(cashInfo?.CashSales),
+        returns: n(cashInfo?.Return ?? cashInfo?.OrderReturn),
+        subtotal: n(payload.CashSubTotal),
+        discount: n(payload.CashDiscountTotal),
+        tax: n(payload.CashTaxTotal),
+        service: n(payload.CashServiceTotal),
+        grandTotal: n(payload.CashGrandTotal),
+        required: n(payload.RequiredCash),
+        available: n(payload.AvailableCash),
+        payments: payments.map((x, i) => ({
+          name: String(x.Desc ?? x.TypeArDesc ?? x.Type ?? `طريقة ${i + 1}`),
+          amount: n(x.sum ?? x.Sum ?? x.Payments),
+        })),
+      };
+      setLastPrintReport(reportData);
       setCash(null);
+      try {
+        await printCashCloseReport(reportData, user, printerSettings);
+      } catch (printError) {
+        setSuccess(`تم إغلاق الكاش رقم ${payload.CashNo} بنجاح، لكن الطباعة لم تكتمل.`);
+        setError(printError instanceof Error ? `فشل طباعة تقرير الإغلاق: ${printError.message}` : 'فشل طباعة تقرير الإغلاق');
+        return;
+      }
+      setLastPrintReport(null);
+      setSuccess(`تم إغلاق الكاش رقم ${payload.CashNo} وطباعته بنجاح`);
 
       if (endDayMode) {
         const d = lineDateParam || fmtDateIso(saleDay?.LineDate ?? cash.CashStartDate);
@@ -127,20 +154,28 @@ function Cash() {
         return;
       }
 
-      if (selectedNo) {
-        router.replace('/cash/opened');
-        return;
-      }
-
-      // مطابق لتدفق Flutter عند إغلاق شفت المستخدم من شاشة إغلاق الكاش العادية.
-      await fetch('/api/auth/logout', { method: 'POST' });
-      clearUser();
-      router.replace('/login');
+      await closePosApplication();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'فشل إغلاق الكاش');
     } finally {
       setSaving(false);
     }
+  }
+
+  async function retryClosePrint() {
+    if (!user || !lastPrintReport) return;
+    setSaving(true); setError('');
+    try {
+      await printCashCloseReport(lastPrintReport, user, printerSettings);
+      setLastPrintReport(null);
+      if (endDayMode) {
+        router.replace(`/end-day?date=${encodeURIComponent(lastPrintReport.lineDate)}`);
+        return;
+      }
+      await closePosApplication();
+    } catch (e) {
+      setError(e instanceof Error ? `فشل طباعة تقرير الإغلاق: ${e.message}` : 'فشل طباعة تقرير الإغلاق');
+    } finally { setSaving(false); }
   }
 
   if (loading) return <Loading label="جاري تحميل بيانات الكاش..." />;
@@ -173,6 +208,7 @@ function Cash() {
       )}
       {success && <div className="cash-close-alert success">{success}</div>}
       {error && <div className="cash-close-alert error">{error}</div>}
+      {lastPrintReport && <div className="cash-close-alert warning"><b>التقرير جاهز لإعادة الطباعة.</b> <button className="btn" onClick={retryClosePrint} disabled={saving}>إعادة طباعة تقرير الإغلاق</button></div>}
 
       <section className="cash-close-toolbar card">
         <div>
@@ -344,26 +380,4 @@ function fmtDateIso(v: unknown) {
   const raw = String(v ?? '');
   const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   return m?.[1] || new Date().toISOString().slice(0, 10);
-}
-
-function shiftLines(p: Record<string, unknown>, payments: Record<string, unknown>[], cashInfo: Record<string, unknown> | null) {
-  return [
-    'FUTEC POS',
-    'تقرير إغلاق الشفت',
-    `Cash: ${String(p.CashNo ?? '')}`,
-    `User: ${String(p.CashUser ?? '')}`,
-    `Date: ${new Date().toLocaleString('ar-JO')}`,
-    '--------------------------------',
-    `Subtotal: ${money(p.CashSubTotal)}`,
-    `Discount: ${money(p.CashDiscountTotal)}`,
-    `Tax: ${money(p.CashTaxTotal)}`,
-    `Grand Total: ${money(p.CashGrandTotal)}`,
-    `Cash Sales: ${money(cashInfo?.CashSales)}`,
-    `Returns: ${money(cashInfo?.Return ?? cashInfo?.OrderReturn)}`,
-    `Opening Balance: ${money(cashInfo?.CashCustody)}`,
-    `Required: ${money(p.RequiredCash)}`,
-    `Available: ${money(p.AvailableCash)}`,
-    '--------------------------------',
-    ...payments.map((x) => `${String(x.Desc ?? x.TypeArDesc ?? x.Type ?? 'Payment')}: ${money(x.sum ?? x.Sum ?? x.Payments)}`),
-  ];
 }
