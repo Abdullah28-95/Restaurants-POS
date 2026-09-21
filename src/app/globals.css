@@ -1085,3 +1085,75 @@ button.nav-link:disabled{opacity:.58;cursor:wait}
   .nav-link.active{color:#25272b!important;background:linear-gradient(180deg,#fffefa,#ead9b5)!important;box-shadow:inset 0 -3px 0 #25272b!important}
   .nav-link.active .nav-icon-wrap{background:#e8d4a7!important;color:#25272b!important}
 }
+
+/* ===== Compact premium sidebar refinement ===== */
+@media(min-width:801px){
+  .app-shell{grid-template-columns:92px minmax(0,1fr)!important}
+  .side-nav{
+    width:92px!important;
+    padding:12px 8px 10px!important;
+    gap:7px!important;
+  }
+  .side-brand{padding:1px 0 7px!important;margin-bottom:0!important}
+  .side-logo{
+    width:62px!important;
+    height:62px!important;
+    border-radius:18px!important;
+  }
+  .side-brand-status{width:9px!important;height:9px!important;left:14px!important;bottom:5px!important}
+  .side-menu{gap:5px!important}
+  .nav-link{
+    min-height:61px!important;
+    padding:6px 4px!important;
+    gap:4px!important;
+    border-radius:15px!important;
+    font-size:10.5px!important;
+    font-weight:800!important;
+    line-height:1.1!important;
+    text-align:center!important;
+  }
+  .nav-icon-wrap{
+    width:34px!important;
+    height:34px!important;
+    border-radius:11px!important;
+    flex:0 0 34px!important;
+  }
+  .nav-icon-wrap svg{width:20px!important;height:20px!important;stroke-width:2!important}
+  .nav-label{
+    display:block!important;
+    width:100%!important;
+    max-width:76px!important;
+    margin:0 auto!important;
+    text-align:center!important;
+    font-size:10.5px!important;
+    font-weight:800!important;
+    line-height:1.15!important;
+    white-space:normal!important;
+    overflow-wrap:normal!important;
+  }
+  button.nav-link.nav-action{
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    justify-content:center!important;
+    text-align:center!important;
+  }
+  button.nav-link.nav-action .nav-label{
+    text-align:center!important;
+    align-self:stretch!important;
+  }
+  .side-footer{padding-top:7px!important}
+  .nav-logout{min-height:56px!important}
+}
+
+@media(max-height:800px) and (min-width:801px){
+  .app-shell{grid-template-columns:86px minmax(0,1fr)!important}
+  .side-nav{width:86px!important;padding:8px 7px 8px!important;gap:4px!important}
+  .side-logo{width:54px!important;height:54px!important;border-radius:16px!important}
+  .side-brand{padding-bottom:3px!important}
+  .nav-link{min-height:52px!important;padding:4px 3px!important;gap:2px!important;border-radius:13px!important}
+  .nav-icon-wrap{width:29px!important;height:29px!important;flex-basis:29px!important;border-radius:9px!important}
+  .nav-icon-wrap svg{width:18px!important;height:18px!important}
+  .nav-label{font-size:9.5px!important;max-width:70px!important}
+  .nav-logout{min-height:48px!important}
+}
